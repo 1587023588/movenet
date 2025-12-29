@@ -94,8 +94,20 @@ class ActionDetector {
 
         Log.d("ActionDetector", "站立=$isStanding, 水平举臂=$isArmsExtended")
 
+        // 深蹲检测
+        val leftKneeAngle = getAngle(keyPointMap[BodyPart.LEFT_HIP], keyPointMap[BodyPart.LEFT_KNEE], keyPointMap[BodyPart.LEFT_ANKLE])
+        val rightKneeAngle = getAngle(keyPointMap[BodyPart.RIGHT_HIP], keyPointMap[BodyPart.RIGHT_KNEE], keyPointMap[BodyPart.RIGHT_ANKLE])
+        val isSquatting = leftKneeAngle < 140 && rightKneeAngle < 140 && leftKneeAngle > 30 && rightKneeAngle > 30
+
+        Log.d("ActionDetector", "站立=$isStanding, 水平举臂=$isArmsExtended, 深蹲=$isSquatting")
+
         // 根据条件判断动作
         return when {
+            isSquatting -> {
+                val corrections = mutableListOf<String>()
+                if (abs(leftKneeAngle - rightKneeAngle) > 20) corrections.add("保持双腿弯曲程度一致")
+                ActionResult(StandardAction.SQUATTING, 0.90f, corrections)
+            }
             isArmsExtended -> {
                 val corrections = mutableListOf<String>()
                 // 检查举臂姿势的标准性

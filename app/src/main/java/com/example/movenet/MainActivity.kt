@@ -44,6 +44,10 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // 设置Toolbar
+        setSupportActionBar(binding.toolbar)
+        supportActionBar?.setDisplayShowTitleEnabled(false) // 隐藏默认标题
+
         // 初始化姿态检测器
         poseDetector = PoseDetector(this)
 
@@ -162,6 +166,7 @@ class MainActivity : AppCompatActivity() {
                 // 更新下半部分的关键点视图
                 binding.keyPointView.apply {
                     setResults(poseResult.persons)
+                    setActionResults(actionResults)
                     setImageSourceInfo(
                         poseResult.srcWidth,
                         poseResult.srcHeight,
@@ -213,6 +218,7 @@ class MainActivity : AppCompatActivity() {
         // 构建朗读文本（使用稳定的动作）
         val actionName = when (stableAction) {
             StandardAction.STANDING -> "站立"
+            StandardAction.SQUATTING -> "深蹲"
             StandardAction.ARMS_EXTENDED -> "水平举臂"
             StandardAction.UNKNOWN -> "未知动作"
             else -> return

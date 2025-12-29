@@ -118,7 +118,7 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
         
         if (persons.isEmpty()) {
             // 显示提示信息
-            canvas.drawText("未检测到人体", 30f, 60f, paintText)
+            canvas.drawText("检测中...", 30f, 60f, paintText)
             return
         }
         
@@ -185,6 +185,7 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
                 // 显示检测到的动作
                 val actionName = when (actionResult.action) {
                     StandardAction.STANDING -> "站立"
+                    StandardAction.SQUATTING -> "深蹲"
                     StandardAction.ARMS_EXTENDED -> "水平举臂"
                     else -> "未知动作"
                 }

@@ -4,13 +4,16 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.CornerPathEffect
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
+import kotlin.math.abs
 
 class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
     
     private var persons: List<Person> = emptyList()
+    private var actionResults: List<ActionResult> = emptyList()
     private var imageWidth: Int = 1
     private var imageHeight: Int = 1
     private var isMirrored: Boolean = false
@@ -48,12 +51,29 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
         strokeWidth = 4f
         isAntiAlias = true
     }
+
+    private val paintReferenceLine = Paint().apply {
+        color = Color.YELLOW
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        isAntiAlias = true
+        pathEffect = DashPathEffect(floatArrayOf(20f, 20f), 0f)
+    }
     
     private val paintText = Paint().apply {
         color = Color.WHITE
         textSize = 22f
         style = Paint.Style.FILL
         isAntiAlias = true
+    }
+
+    private val paintCenterText = Paint().apply {
+        color = Color.WHITE
+        textSize = 40f
+        style = Paint.Style.FILL
+        isAntiAlias = true
+        textAlign = Paint.Align.CENTER
+        setShadowLayer(5f, 0f, 0f, Color.BLACK)
     }
 
     private val bodyJoints = listOf(
@@ -78,6 +98,10 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
     fun setResults(persons: List<Person>) {
         this.persons = persons
     }
+
+    fun setActionResults(actionResults: List<ActionResult>) {
+        this.actionResults = actionResults
+    }
     
     fun setImageSourceInfo(width: Int, height: Int, isMirrored: Boolean = false) {
         this.imageWidth = width
@@ -93,14 +117,29 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
         drawAxes(canvas)
 
         if (persons.isEmpty()) {
-            canvas.drawText("未检测到人体", 30f, 60f, paintText)
+            canvas.drawText("检测中...", width / 2f, 80f, paintCenterText)
             return
+        }
+
+        // 绘制当前动作状态
+        if (actionResults.isNotEmpty()) {
+            val result = actionResults[0]
+            val actionName = when (result.action) {
+                StandardAction.STANDING -> "站立"
+                StandardAction.SQUATTING -> "深蹲"
+                StandardAction.ARMS_EXTENDED -> "水平举臂"
+                else -> "检测中..."
+            }
+            val text = "$actionName (${(result.confidence * 100).toInt()}%)"
+            canvas.drawText(text, width / 2f, 80f, paintCenterText)
+        } else {
+            canvas.drawText("检测中...", width / 2f, 80f, paintCenterText)
         }
         
         val scaleX = width.toFloat() / imageWidth
         val scaleY = height.toFloat() / imageHeight
         
-        persons.forEach { person ->
+        persons.forEachIndexed { index, person ->
             // 绘制骨架连线
             bodyJoints.forEach { (start, end) ->
                 val startPoint = person.keyPoints.find { it.bodyPart == start }
@@ -129,6 +168,52 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
                     paintPoint.alpha = alpha
                     canvas.drawCircle(x, y, radius, paintPoint)
                 }
+            }
+
+            // 绘制水平举臂参考线
+            // 当任一手臂抬起超过45度时显示参考线
+            val leftShoulder = person.keyPoints.find { it.bodyPart == BodyPart.LEFT_SHOULDER }
+            val rightShoulder = person.keyPoints.find { it.bodyPart == BodyPart.RIGHT_SHOULDER }
+            val leftElbow = person.keyPoints.find { it.bodyPart == BodyPart.LEFT_ELBOW }
+            val rightElbow = person.keyPoints.find { it.bodyPart == BodyPart.RIGHT_ELBOW }
+
+            var isArmRaised = false
+            
+            // 检查左臂是否抬起 (>45度, 即水平距离 > 垂直距离)
+            if (leftShoulder != null && leftElbow != null && 
+                leftShoulder.score > 0.2f && leftElbow.score > 0.2f) {
+                val dy = abs(leftElbow.coordinate.second - leftShoulder.coordinate.second)
+                val dx = abs(leftElbow.coordinate.first - leftShoulder.coordinate.first)
+                if (dx > dy) isArmRaised = true
+            }
+            
+            // 检查右臂是否抬起
+            if (!isArmRaised && rightShoulder != null && rightElbow != null && 
+                rightShoulder.score > 0.2f && rightElbow.score > 0.2f) {
+                val dy = abs(rightElbow.coordinate.second - rightShoulder.coordinate.second)
+                val dx = abs(rightElbow.coordinate.first - rightShoulder.coordinate.first)
+                if (dx > dy) isArmRaised = true
+            }
+
+            if (isArmRaised && leftShoulder != null && rightShoulder != null &&
+                leftShoulder.score > 0.2f && rightShoulder.score > 0.2f) {
+                
+                val leftX = toViewX(leftShoulder.coordinate.first * scaleX)
+                val rightX = toViewX(rightShoulder.coordinate.first * scaleX)
+                val y = (leftShoulder.coordinate.second + rightShoulder.coordinate.second) / 2 * scaleY
+                
+                // 从肩膀向外延伸绘制水平线
+                if (leftX < rightX) {
+                    // 左肩在左侧，右肩在右侧（镜像模式下通常如此）
+                    canvas.drawLine(leftX, y, 0f, y, paintReferenceLine)
+                    canvas.drawLine(rightX, y, width.toFloat(), y, paintReferenceLine)
+                } else {
+                    // 左肩在右侧，右肩在左侧
+                    canvas.drawLine(leftX, y, width.toFloat(), y, paintReferenceLine)
+                    canvas.drawLine(rightX, y, 0f, y, paintReferenceLine)
+                }
+                
+                canvas.drawText("标准水平线", 30f, y - 10f, paintText)
             }
         }
     }
