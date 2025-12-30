@@ -80,11 +80,21 @@ class ActionDetector {
         Log.d("ActionDetector", "左臂伸展=$leftArmExtended, 右臂伸展=$rightArmExtended")
         Log.d("ActionDetector", "腿长比=$legToTorsoRatio")
 
-        // 站立检测：腿基本伸直，手臂自然下垂
-        val isStanding = thighToTorsoRatio < 0.9 && // 腿没有大幅弯曲
-                         legToTorsoRatio > 1.5 && // 腿伸直
-                         wristY > shoulderY + torsoLength * 0.3 && // 手腕在肩膀下方（手臂没有抬起）
-                         !leftArmHorizontal && !rightArmHorizontal // 手臂没有水平举起
+        // 计算膝盖角度
+        val leftKneeAngle = getAngle(keyPointMap[BodyPart.LEFT_HIP], keyPointMap[BodyPart.LEFT_KNEE], keyPointMap[BodyPart.LEFT_ANKLE])
+        val rightKneeAngle = getAngle(keyPointMap[BodyPart.RIGHT_HIP], keyPointMap[BodyPart.RIGHT_KNEE], keyPointMap[BodyPart.RIGHT_ANKLE])
+        
+        // 计算髋部角度 (用于判断身体是否挺直)
+        val leftHipAngle = getAngle(keyPointMap[BodyPart.LEFT_SHOULDER], keyPointMap[BodyPart.LEFT_HIP], keyPointMap[BodyPart.LEFT_KNEE])
+        val rightHipAngle = getAngle(keyPointMap[BodyPart.RIGHT_SHOULDER], keyPointMap[BodyPart.RIGHT_HIP], keyPointMap[BodyPart.RIGHT_KNEE])
+
+        // 站立检测优化：使用角度判断更准确
+        // 1. 膝盖角度大 (腿直) > 160度
+        // 2. 髋部角度大 (腰直) > 160度
+        // 3. 手臂没有水平举起
+        val isStanding = leftKneeAngle > 160 && rightKneeAngle > 160 &&
+                         leftHipAngle > 160 && rightHipAngle > 160 &&
+                         !leftArmHorizontal && !rightArmHorizontal
 
         // 水平举臂检测：双臂水平向两侧伸展
         val isArmsExtended = leftArmHorizontal && rightArmHorizontal && // 双手与肩膀同高
@@ -95,8 +105,6 @@ class ActionDetector {
         Log.d("ActionDetector", "站立=$isStanding, 水平举臂=$isArmsExtended")
 
         // 深蹲检测
-        val leftKneeAngle = getAngle(keyPointMap[BodyPart.LEFT_HIP], keyPointMap[BodyPart.LEFT_KNEE], keyPointMap[BodyPart.LEFT_ANKLE])
-        val rightKneeAngle = getAngle(keyPointMap[BodyPart.RIGHT_HIP], keyPointMap[BodyPart.RIGHT_KNEE], keyPointMap[BodyPart.RIGHT_ANKLE])
         val isSquatting = leftKneeAngle < 140 && rightKneeAngle < 140 && leftKneeAngle > 30 && rightKneeAngle > 30
 
         Log.d("ActionDetector", "站立=$isStanding, 水平举臂=$isArmsExtended, 深蹲=$isSquatting")

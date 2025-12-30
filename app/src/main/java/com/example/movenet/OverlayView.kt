@@ -20,14 +20,28 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
     private val paintCircle = Paint().apply {
         color = Color.GREEN
         style = Paint.Style.FILL
-        strokeWidth = 8f
+        strokeWidth = 6f
+        isAntiAlias = true
+    }
+
+    private val paintHandCircle = Paint().apply {
+        color = Color.RED
+        style = Paint.Style.FILL
+        strokeWidth = 6f
         isAntiAlias = true
     }
     
     private val paintLine = Paint().apply {
         color = Color.BLUE
         style = Paint.Style.STROKE
-        strokeWidth = 8f
+        strokeWidth = 4f
+        isAntiAlias = true
+    }
+
+    private val paintArmLine = Paint().apply {
+        color = Color.RED
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
         isAntiAlias = true
     }
     
@@ -162,7 +176,17 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
                     val (startX, startY) = mapPoint(startPoint.coordinate.first, startPoint.coordinate.second, scale, dx, dy)
                     val (endX, endY) = mapPoint(endPoint.coordinate.first, endPoint.coordinate.second, scale, dx, dy)
                     
-                    canvas.drawLine(startX, startY, endX, endY, paintLine)
+                    // 判断是否为手臂连接线
+                    val isArmLine = (start == BodyPart.LEFT_SHOULDER && end == BodyPart.LEFT_ELBOW) ||
+                                    (start == BodyPart.LEFT_ELBOW && end == BodyPart.LEFT_WRIST) ||
+                                    (start == BodyPart.RIGHT_SHOULDER && end == BodyPart.RIGHT_ELBOW) ||
+                                    (start == BodyPart.RIGHT_ELBOW && end == BodyPart.RIGHT_WRIST)
+
+                    if (isArmLine) {
+                        canvas.drawLine(startX, startY, endX, endY, paintArmLine)
+                    } else {
+                        canvas.drawLine(startX, startY, endX, endY, paintLine)
+                    }
                 }
             }
             
@@ -173,9 +197,15 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
                     
                     // 根据置信度调整颜色
                     val alpha = (keyPoint.score * 255).toInt().coerceIn(50, 255)
-                    paintCircle.alpha = alpha
                     
-                    canvas.drawCircle(x, y, 15f, paintCircle)
+                    if (keyPoint.bodyPart == BodyPart.LEFT_WRIST || keyPoint.bodyPart == BodyPart.RIGHT_WRIST ||
+                        keyPoint.bodyPart == BodyPart.LEFT_ELBOW || keyPoint.bodyPart == BodyPart.RIGHT_ELBOW) {
+                        paintHandCircle.alpha = alpha
+                        canvas.drawCircle(x, y, 8f, paintHandCircle)
+                    } else {
+                        paintCircle.alpha = alpha
+                        canvas.drawCircle(x, y, 8f, paintCircle)
+                    }
                 }
             }
             

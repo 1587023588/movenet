@@ -32,6 +32,19 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
         isAntiAlias = true
     }
 
+    private val paintArmLine = Paint().apply {
+        color = Color.RED
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+        isAntiAlias = true
+    }
+
+    private val paintHandPoint = Paint().apply {
+        color = Color.RED
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+
     private val paintPlane = Paint().apply {
         color = Color.parseColor("#0D00FFFF")
         style = Paint.Style.FILL
@@ -155,7 +168,17 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
                     val (startX, startY) = mapPoint(startPoint.coordinate.first, startPoint.coordinate.second, scale, dx, dy)
                     val (endX, endY) = mapPoint(endPoint.coordinate.first, endPoint.coordinate.second, scale, dx, dy)
 
-                    canvas.drawLine(startX, startY, endX, endY, paintLine)
+                    // 判断是否为手臂连接线
+                    val isArmLine = (start == BodyPart.LEFT_SHOULDER && end == BodyPart.LEFT_ELBOW) ||
+                                    (start == BodyPart.LEFT_ELBOW && end == BodyPart.LEFT_WRIST) ||
+                                    (start == BodyPart.RIGHT_SHOULDER && end == BodyPart.RIGHT_ELBOW) ||
+                                    (start == BodyPart.RIGHT_ELBOW && end == BodyPart.RIGHT_WRIST)
+
+                    if (isArmLine) {
+                        canvas.drawLine(startX, startY, endX, endY, paintArmLine)
+                    } else {
+                        canvas.drawLine(startX, startY, endX, endY, paintLine)
+                    }
                 }
             }
 
@@ -166,8 +189,15 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
                     
                     val radius = 6f + (keyPoint.score * 10f)
                     val alpha = (keyPoint.score * 255).toInt().coerceIn(80, 255)
-                    paintPoint.alpha = alpha
-                    canvas.drawCircle(x, y, radius, paintPoint)
+                    
+                    if (keyPoint.bodyPart == BodyPart.LEFT_WRIST || keyPoint.bodyPart == BodyPart.RIGHT_WRIST ||
+                        keyPoint.bodyPart == BodyPart.LEFT_ELBOW || keyPoint.bodyPart == BodyPart.RIGHT_ELBOW) {
+                        paintHandPoint.alpha = alpha
+                        canvas.drawCircle(x, y, radius, paintHandPoint)
+                    } else {
+                        paintPoint.alpha = alpha
+                        canvas.drawCircle(x, y, radius, paintPoint)
+                    }
                 }
             }
 

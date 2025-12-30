@@ -53,15 +53,15 @@ enum class BodyPart(val position: Int) {
 
 class PoseDetector(private val context: Context) {
     private var interpreter: Interpreter? = null
-    private val inputWidth = 192
-    private val inputHeight = 192
+    private val inputWidth = 256
+    private val inputHeight = 256
 
     init {
         try {
             val options = Interpreter.Options().apply {
                 setNumThreads(4)
             }
-            val modelFile = FileUtil.loadMappedFile(context, "movenet_singlepose_lightning.tflite")
+            val modelFile = FileUtil.loadMappedFile(context, "movenet_singlepose_thunder.tflite")
             interpreter = Interpreter(modelFile, options)
             
             // 打印模型详细信息
