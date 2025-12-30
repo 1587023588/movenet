@@ -3,6 +3,7 @@ package com.example.movenet
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.widget.Toast
@@ -32,6 +33,21 @@ class MainActivity : AppCompatActivity() {
     // 动作稳定性检查
     private var actionHistory = mutableListOf<StandardAction>()
     private val historySize = 5 // 保留最近5帧的动作判定
+
+    // 可视化稳定：降低重绘频率 + 关键点平滑 + 短暂丢帧保持（减少“闪动/抖动”观感）
+    private val uiMaxFps = 30
+    private val uiFrameIntervalMs = 1000L / uiMaxFps
+    private var lastUiUpdateAtMs: Long = 0L
+
+    private val visualHoldMs = 200L
+    private var lastNonEmptyVisualAtMs: Long = 0L
+    private var lastNonEmptyPersons: List<Person> = emptyList()
+    private var lastNonEmptyActionResults: List<ActionResult> = emptyList()
+
+    private val poseSmoother = PoseSmoother(
+        alpha = 0.35f,
+        minScore = 0.2f
+    )
 
     companion object {
         private const val TAG = "MoveNetApp"
@@ -150,29 +166,64 @@ class MainActivity : AppCompatActivity() {
             
             // 更新可视化
             runOnUiThread {
+                val nowMs = SystemClock.uptimeMillis()
+
+                // 1) 限制UI重绘频率（默认30fps），减少高频跳变带来的“闪动”
+                if (nowMs - lastUiUpdateAtMs < uiFrameIntervalMs) {
+                    return@runOnUiThread
+                }
+                lastUiUpdateAtMs = nowMs
+
+                // 2) 短暂丢帧保持：模型偶发返回空结果时，继续显示上一次结果一小段时间
+                val rawPersons = poseResult.persons
+                val rawActionResults = actionResults
+
+                val visualPersons = if (rawPersons.isNotEmpty()) {
+                    lastNonEmptyPersons = rawPersons
+                    lastNonEmptyActionResults = rawActionResults
+                    lastNonEmptyVisualAtMs = nowMs
+                    rawPersons
+                } else if (nowMs - lastNonEmptyVisualAtMs <= visualHoldMs) {
+                    lastNonEmptyPersons
+                } else {
+                    poseSmoother.reset()
+                    emptyList()
+                }
+
+                val visualActionResults = if (rawPersons.isNotEmpty()) {
+                    rawActionResults
+                } else if (nowMs - lastNonEmptyVisualAtMs <= visualHoldMs) {
+                    lastNonEmptyActionResults
+                } else {
+                    emptyList()
+                }
+
+                // 3) 关键点指数平滑（EMA）：显著降低手/肘等点位抖动
+                val smoothedPersons = poseSmoother.smooth(visualPersons)
+
                 // 更新上半部分的骨架覆盖层
                 binding.overlay.apply {
-                    setResults(poseResult.persons)
-                    setActionResults(actionResults)
+                    setResults(smoothedPersons)
+                    setActionResults(visualActionResults)
                     setImageSourceInfo(
                         poseResult.srcWidth,
                         poseResult.srcHeight,
                         imageProxy.imageInfo.rotationDegrees,
                         /*isMirrored=*/true
                     )
-                    invalidate()
+                    postInvalidateOnAnimation()
                 }
                 
                 // 更新下半部分的关键点视图
                 binding.keyPointView.apply {
-                    setResults(poseResult.persons)
-                    setActionResults(actionResults)
+                    setResults(smoothedPersons)
+                    setActionResults(visualActionResults)
                     setImageSourceInfo(
                         poseResult.srcWidth,
                         poseResult.srcHeight,
                         /*isMirrored=*/true
                     )
-                    invalidate()
+                    postInvalidateOnAnimation()
                 }
             }
         } catch (e: Exception) {
@@ -180,6 +231,51 @@ class MainActivity : AppCompatActivity() {
         } finally {
             // 必须关闭imageProxy以释放缓冲区
             imageProxy.close()
+        }
+    }
+
+    private class PoseSmoother(
+        private val alpha: Float,
+        private val minScore: Float
+    ) {
+        private val prev: MutableMap<Int, MutableMap<BodyPart, Pair<Float, Float>>> = mutableMapOf()
+
+        fun reset() {
+            prev.clear()
+        }
+
+        fun smooth(persons: List<Person>): List<Person> {
+            if (persons.isEmpty()) return emptyList()
+
+            val result = persons.mapIndexed { personIndex, person ->
+                val prevForPerson = prev.getOrPut(personIndex) { mutableMapOf() }
+
+                val smoothedKeyPoints = person.keyPoints.map { kp ->
+                    val previous = prevForPerson[kp.bodyPart]
+
+                    val smoothed = if (kp.score < minScore && previous != null) {
+                        previous
+                    } else if (previous == null) {
+                        kp.coordinate
+                    } else {
+                        val newX = previous.first + alpha * (kp.coordinate.first - previous.first)
+                        val newY = previous.second + alpha * (kp.coordinate.second - previous.second)
+                        Pair(newX, newY)
+                    }
+
+                    prevForPerson[kp.bodyPart] = smoothed
+                    kp.copy(coordinate = smoothed)
+                }
+
+                person.copy(keyPoints = smoothedKeyPoints)
+            }
+
+            // 若人数变少，清理多余缓存（本项目通常是单人模型，但做一下防御）
+            val maxIndex = result.lastIndex
+            val toRemove = prev.keys.filter { it > maxIndex }
+            toRemove.forEach { prev.remove(it) }
+
+            return result
         }
     }
     
