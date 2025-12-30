@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
 import kotlin.math.abs
+import kotlin.math.max
 
 class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
     
@@ -136,8 +137,11 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
             canvas.drawText("检测中...", width / 2f, 80f, paintCenterText)
         }
         
-        val scaleX = width.toFloat() / imageWidth
-        val scaleY = height.toFloat() / imageHeight
+        val scale = max(width.toFloat() / imageWidth, height.toFloat() / imageHeight)
+        val scaledWidth = imageWidth * scale
+        val scaledHeight = imageHeight * scale
+        val dx = (width - scaledWidth) / 2f
+        val dy = (height - scaledHeight) / 2f
         
         persons.forEachIndexed { index, person ->
             // 绘制骨架连线
@@ -148,10 +152,8 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
                 if (startPoint != null && endPoint != null &&
                     startPoint.score > 0.2f && endPoint.score > 0.2f) {
 
-                    val startX = toViewX(startPoint.coordinate.first * scaleX)
-                    val startY = startPoint.coordinate.second * scaleY
-                    val endX = toViewX(endPoint.coordinate.first * scaleX)
-                    val endY = endPoint.coordinate.second * scaleY
+                    val (startX, startY) = mapPoint(startPoint.coordinate.first, startPoint.coordinate.second, scale, dx, dy)
+                    val (endX, endY) = mapPoint(endPoint.coordinate.first, endPoint.coordinate.second, scale, dx, dy)
 
                     canvas.drawLine(startX, startY, endX, endY, paintLine)
                 }
@@ -160,8 +162,7 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
             // 绘制关键点
             person.keyPoints.forEach { keyPoint ->
                 if (keyPoint.score > 0.2f) {
-                    val x = toViewX(keyPoint.coordinate.first * scaleX)
-                    val y = keyPoint.coordinate.second * scaleY
+                    val (x, y) = mapPoint(keyPoint.coordinate.first, keyPoint.coordinate.second, scale, dx, dy)
                     
                     val radius = 6f + (keyPoint.score * 10f)
                     val alpha = (keyPoint.score * 255).toInt().coerceIn(80, 255)
@@ -198,9 +199,9 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
             if (isArmRaised && leftShoulder != null && rightShoulder != null &&
                 leftShoulder.score > 0.2f && rightShoulder.score > 0.2f) {
                 
-                val leftX = toViewX(leftShoulder.coordinate.first * scaleX)
-                val rightX = toViewX(rightShoulder.coordinate.first * scaleX)
-                val y = (leftShoulder.coordinate.second + rightShoulder.coordinate.second) / 2 * scaleY
+                val (leftX, leftY) = mapPoint(leftShoulder.coordinate.first, leftShoulder.coordinate.second, scale, dx, dy)
+                val (rightX, rightY) = mapPoint(rightShoulder.coordinate.first, rightShoulder.coordinate.second, scale, dx, dy)
+                val y = (leftY + rightY) / 2f
                 
                 // 从肩膀向外延伸绘制水平线
                 if (leftX < rightX) {
@@ -305,7 +306,11 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
         canvas.drawLine(endX, endY, x2, y2, paint)
     }
 
-    private fun toViewX(x: Float): Float {
-        return if (isMirrored) width - x else x
+    private fun mapPoint(x: Float, y: Float, scale: Float, dx: Float, dy: Float): Pair<Float, Float> {
+        // Keep skeleton aligned with PreviewView FILL_CENTER scaling
+        val mappedX = x * scale + dx
+        val mappedY = y * scale + dy
+        val finalX = if (isMirrored) width - mappedX else mappedX
+        return Pair(finalX, mappedY)
     }
 }

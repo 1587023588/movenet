@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
+import kotlin.math.max
 
 class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
     
@@ -122,8 +123,11 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
             return
         }
         
-        val scaleX = width.toFloat() / imageWidth
-        val scaleY = height.toFloat() / imageHeight
+        val scale = max(width.toFloat() / imageWidth, height.toFloat() / imageHeight)
+        val scaledWidth = imageWidth * scale
+        val scaledHeight = imageHeight * scale
+        val dx = (width - scaledWidth) / 2f
+        val dy = (height - scaledHeight) / 2f
         
         var personCount = 0
         persons.forEach { person ->
@@ -155,10 +159,8 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
                 if (startPoint != null && endPoint != null &&
                     startPoint.score > 0.2f && endPoint.score > 0.2f) {
                     
-                    val startX = toViewX(startPoint.coordinate.first * scaleX)
-                    val startY = startPoint.coordinate.second * scaleY
-                    val endX = toViewX(endPoint.coordinate.first * scaleX)
-                    val endY = endPoint.coordinate.second * scaleY
+                    val (startX, startY) = mapPoint(startPoint.coordinate.first, startPoint.coordinate.second, scale, dx, dy)
+                    val (endX, endY) = mapPoint(endPoint.coordinate.first, endPoint.coordinate.second, scale, dx, dy)
                     
                     canvas.drawLine(startX, startY, endX, endY, paintLine)
                 }
@@ -167,8 +169,7 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
             // 绘制检测到的关键点
             person.keyPoints.forEach { keyPoint ->
                 if (keyPoint.score > 0.2f) {
-                    val x = toViewX(keyPoint.coordinate.first * scaleX)
-                    val y = keyPoint.coordinate.second * scaleY
+                    val (x, y) = mapPoint(keyPoint.coordinate.first, keyPoint.coordinate.second, scale, dx, dy)
                     
                     // 根据置信度调整颜色
                     val alpha = (keyPoint.score * 255).toInt().coerceIn(50, 255)
@@ -231,8 +232,9 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
     private fun drawPoseSkeleton(
         canvas: Canvas,
         keyPoints: List<KeyPoint>,
-        scaleX: Float,
-        scaleY: Float,
+        scale: Float,
+        dx: Float,
+        dy: Float,
         linePaint: Paint,
         circlePaint: Paint
     ) {
@@ -242,10 +244,8 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
             val endPoint = keyPoints.find { it.bodyPart == end }
             
             if (startPoint != null && endPoint != null) {
-                val startX = toViewX(startPoint.coordinate.first * scaleX)
-                val startY = startPoint.coordinate.second * scaleY
-                val endX = toViewX(endPoint.coordinate.first * scaleX)
-                val endY = endPoint.coordinate.second * scaleY
+                val (startX, startY) = mapPoint(startPoint.coordinate.first, startPoint.coordinate.second, scale, dx, dy)
+                val (endX, endY) = mapPoint(endPoint.coordinate.first, endPoint.coordinate.second, scale, dx, dy)
                 
                 canvas.drawLine(startX, startY, endX, endY, linePaint)
             }
@@ -253,13 +253,16 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
         
         // 绘制参考关键点
         keyPoints.forEach { keyPoint ->
-            val x = toViewX(keyPoint.coordinate.first * scaleX)
-            val y = keyPoint.coordinate.second * scaleY
+            val (x, y) = mapPoint(keyPoint.coordinate.first, keyPoint.coordinate.second, scale, dx, dy)
             canvas.drawCircle(x, y, 10f, circlePaint)
         }
     }
 
-    private fun toViewX(x: Float): Float {
-        return if (isMirrored) width - x else x
+    private fun mapPoint(x: Float, y: Float, scale: Float, dx: Float, dy: Float): Pair<Float, Float> {
+        // Match PreviewView default FILL_CENTER scale so overlay joints stick to the video
+        val mappedX = x * scale + dx
+        val mappedY = y * scale + dy
+        val finalX = if (isMirrored) width - mappedX else mappedX
+        return Pair(finalX, mappedY)
     }
 }
