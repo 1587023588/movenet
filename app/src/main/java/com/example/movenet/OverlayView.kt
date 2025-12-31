@@ -20,28 +20,28 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
     private val paintCircle = Paint().apply {
         color = Color.GREEN
         style = Paint.Style.FILL
-        strokeWidth = 6f
+        strokeWidth = 10f
         isAntiAlias = true
     }
 
     private val paintHandCircle = Paint().apply {
         color = Color.RED
         style = Paint.Style.FILL
-        strokeWidth = 6f
+        strokeWidth = 10f
         isAntiAlias = true
     }
     
     private val paintLine = Paint().apply {
         color = Color.BLUE
         style = Paint.Style.STROKE
-        strokeWidth = 4f
+        strokeWidth = 9f
         isAntiAlias = true
     }
 
     private val paintArmLine = Paint().apply {
         color = Color.RED
         style = Paint.Style.STROKE
-        strokeWidth = 4f
+        strokeWidth = 9f
         isAntiAlias = true
     }
     
@@ -200,11 +200,11 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
                     
                     if (keyPoint.bodyPart == BodyPart.LEFT_WRIST || keyPoint.bodyPart == BodyPart.RIGHT_WRIST ||
                         keyPoint.bodyPart == BodyPart.LEFT_ELBOW || keyPoint.bodyPart == BodyPart.RIGHT_ELBOW) {
-                        paintHandCircle.alpha = alpha
-                        canvas.drawCircle(x, y, 8f, paintHandCircle)
+                        paintHandCircle.alpha = alpha.coerceAtLeast(120)
+                        canvas.drawCircle(x, y, 10f, paintHandCircle)
                     } else {
-                        paintCircle.alpha = alpha
-                        canvas.drawCircle(x, y, 8f, paintCircle)
+                        paintCircle.alpha = alpha.coerceAtLeast(120)
+                        canvas.drawCircle(x, y, 10f, paintCircle)
                     }
                 }
             }
@@ -217,6 +217,8 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
                 val actionName = when (actionResult.action) {
                     StandardAction.STANDING -> "站立"
                     StandardAction.SQUATTING -> "深蹲"
+                    StandardAction.JUMPING_JACK -> "开合跳"
+                    StandardAction.HORSE_STANCE -> "扎马步"
                     StandardAction.ARMS_EXTENDED -> "水平举臂"
                     else -> "未知动作"
                 }

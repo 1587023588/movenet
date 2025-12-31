@@ -5,7 +5,15 @@ import kotlin.math.*
 
 // 标准动作定义
 enum class StandardAction {
-    STANDING, SQUATTING, ARMS_RAISED, ARMS_EXTENDED, HANDS_ON_HIPS, ARMS_CROSSED, UNKNOWN
+    STANDING,
+    SQUATTING,
+    JUMPING_JACK,
+    HORSE_STANCE,
+    ARMS_RAISED,
+    ARMS_EXTENDED,
+    HANDS_ON_HIPS,
+    ARMS_CROSSED,
+    UNKNOWN
 }
 
 data class ActionResult(
@@ -15,6 +23,10 @@ data class ActionResult(
 )
 
 class ActionDetector {
+
+    // 简单的“站立基准”缓存，用于按个人比例自适应阈值
+    private var baselineShoulderWidth: Float = 0f
+    private var baselineHeight: Float = 0f
 
     fun detectAction(person: Person): ActionResult {
         if (person.keyPoints.size < 17) {
@@ -36,6 +48,7 @@ class ActionDetector {
         val rightShoulderY = keyPointMap[BodyPart.RIGHT_SHOULDER]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val leftShoulderX = keyPointMap[BodyPart.LEFT_SHOULDER]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val rightShoulderX = keyPointMap[BodyPart.RIGHT_SHOULDER]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
+        val noseY = keyPointMap[BodyPart.NOSE]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         
         val leftWristY = keyPointMap[BodyPart.LEFT_WRIST]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val rightWristY = keyPointMap[BodyPart.RIGHT_WRIST]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
@@ -47,10 +60,16 @@ class ActionDetector {
         
         val leftHipY = keyPointMap[BodyPart.LEFT_HIP]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val rightHipY = keyPointMap[BodyPart.RIGHT_HIP]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
+        val leftHipX = keyPointMap[BodyPart.LEFT_HIP]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
+        val rightHipX = keyPointMap[BodyPart.RIGHT_HIP]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val leftKneeY = keyPointMap[BodyPart.LEFT_KNEE]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val rightKneeY = keyPointMap[BodyPart.RIGHT_KNEE]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
+        val leftKneeX = keyPointMap[BodyPart.LEFT_KNEE]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
+        val rightKneeX = keyPointMap[BodyPart.RIGHT_KNEE]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val leftAnkleY = keyPointMap[BodyPart.LEFT_ANKLE]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val rightAnkleY = keyPointMap[BodyPart.RIGHT_ANKLE]?.coordinate?.second ?: return ActionResult(StandardAction.UNKNOWN, 0f)
+        val leftAnkleX = keyPointMap[BodyPart.LEFT_ANKLE]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
+        val rightAnkleX = keyPointMap[BodyPart.RIGHT_ANKLE]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
 
         val shoulderY = (leftShoulderY + rightShoulderY) / 2
         val wristY = (leftWristY + rightWristY) / 2
@@ -58,15 +77,34 @@ class ActionDetector {
         val kneeY = (leftKneeY + rightKneeY) / 2
         val ankleY = (leftAnkleY + rightAnkleY) / 2
 
-        // 计算各部分距离
-        val torsoLength = hipY - shoulderY
-        val thighLength = kneeY - hipY
-        val calfLength = ankleY - kneeY
-        val totalLegLength = ankleY - hipY
+        // 计算各部分距离与比例（使用个人基准）
         val shoulderWidth = abs(rightShoulderX - leftShoulderX)
-        
-        val thighToTorsoRatio = thighLength / torsoLength
-        val legToTorsoRatio = totalLegLength / torsoLength
+        val hipWidth = abs(rightHipX - leftHipX)
+        val ankleWidth = abs(rightAnkleX - leftAnkleX)
+        val kneeWidth = abs(rightKneeX - leftKneeX)
+        val torsoLength = hipY - shoulderY
+        val totalHeight = (listOf(
+            keyPointMap[BodyPart.NOSE],
+            keyPointMap[BodyPart.LEFT_ANKLE],
+            keyPointMap[BodyPart.RIGHT_ANKLE]
+        ).mapNotNull { it?.coordinate?.second }.maxOrNull() ?: ankleY) -
+            (listOf(
+                keyPointMap[BodyPart.NOSE],
+                keyPointMap[BodyPart.LEFT_SHOULDER],
+                keyPointMap[BodyPart.RIGHT_SHOULDER]
+            ).mapNotNull { it?.coordinate?.second }.minOrNull() ?: shoulderY)
+
+        // 更新个人基准（站立且手臂未水平时）
+        val isLikelyStanding = getAngle(keyPointMap[BodyPart.LEFT_HIP], keyPointMap[BodyPart.LEFT_KNEE], keyPointMap[BodyPart.LEFT_ANKLE]) > 165 &&
+                getAngle(keyPointMap[BodyPart.RIGHT_HIP], keyPointMap[BodyPart.RIGHT_KNEE], keyPointMap[BodyPart.RIGHT_ANKLE]) > 165 &&
+                abs(leftWristY - leftShoulderY) > 40 && abs(rightWristY - rightShoulderY) > 40
+        if (isLikelyStanding) {
+            baselineShoulderWidth = if (baselineShoulderWidth == 0f) shoulderWidth else (baselineShoulderWidth * 0.7f + shoulderWidth * 0.3f)
+            baselineHeight = if (baselineHeight == 0f) totalHeight else (baselineHeight * 0.7f + totalHeight * 0.3f)
+        }
+
+        val refShoulder = if (baselineShoulderWidth > 0f) baselineShoulderWidth else shoulderWidth.coerceAtLeast(1f)
+        val refHeight = if (baselineHeight > 0f) baselineHeight else totalHeight.coerceAtLeast(1f)
         
         // 手臂检测
         val leftArmHorizontal = abs(leftWristY - leftShoulderY) < 40 // 左手腕与肩膀Y坐标接近（水平）
@@ -75,10 +113,7 @@ class ActionDetector {
         val rightArmExtended = abs(rightWristX - rightShoulderX) > shoulderWidth * 0.8 // 右臂向外伸展
         
         // 调试日志
-        Log.d("ActionDetector", "肩Y=$shoulderY, 腕Y=$wristY, 臀Y=$hipY")
-        Log.d("ActionDetector", "左臂水平=$leftArmHorizontal, 右臂水平=$rightArmHorizontal")
-        Log.d("ActionDetector", "左臂伸展=$leftArmExtended, 右臂伸展=$rightArmExtended")
-        Log.d("ActionDetector", "腿长比=$legToTorsoRatio")
+        Log.d("ActionDetector", "肩宽=$shoulderWidth, 基准肩宽=$baselineShoulderWidth, 身高=$totalHeight, 基准身高=$baselineHeight")
 
         // 计算膝盖角度
         val leftKneeAngle = getAngle(keyPointMap[BodyPart.LEFT_HIP], keyPointMap[BodyPart.LEFT_KNEE], keyPointMap[BodyPart.LEFT_ANKLE])
@@ -105,40 +140,126 @@ class ActionDetector {
         Log.d("ActionDetector", "站立=$isStanding, 水平举臂=$isArmsExtended")
 
         // 深蹲检测
-        val isSquatting = leftKneeAngle < 140 && rightKneeAngle < 140 && leftKneeAngle > 30 && rightKneeAngle > 30
+        // 深蹲：膝角小、髋角也明显折叠，且双脚不要过宽（避免与扎马步混淆）
+        val squatLegsNotTooWide = ankleWidth < shoulderWidth * 1.25f && ankleWidth < hipWidth * 1.25f
+        val squatKneesBent = leftKneeAngle < 135 && rightKneeAngle < 135 && leftKneeAngle > 40 && rightKneeAngle > 40
+        val squatHipsFold = leftHipAngle < 150 && rightHipAngle < 150
+        val isSquatting = squatLegsNotTooWide && squatKneesBent && squatHipsFold
 
-        Log.d("ActionDetector", "站立=$isStanding, 水平举臂=$isArmsExtended, 深蹲=$isSquatting")
+        // 扎马步：双脚分开、膝弯约90度、上身直立，允许轻微更宽（基于个人肩宽/身高）
+        val horseLegsWide = ankleWidth > refShoulder * 1.20f || kneeWidth > refShoulder * 1.15f || ankleWidth > hipWidth * 1.15f
+        val horseKneesBent = leftKneeAngle in 85f..135f && rightKneeAngle in 85f..135f
+        val horseTorsoUpright = leftHipAngle > 145 && rightHipAngle > 145
+        val horseKneesAligned = abs(leftKneeY - rightKneeY) < refHeight * 0.10f
+        val isHorseStance = horseLegsWide && horseKneesBent && horseTorsoUpright && horseKneesAligned
+
+        // 开合跳评分制：更宽容的标准动作
+        val armsOverHeadScore = scoreOverHead(wristY = wristY, shoulderY = shoulderY, noseY = noseY, refHeight = refHeight)
+        val legSpreadRatio = ankleWidth / refShoulder
+        val legSpreadScore = when {
+            legSpreadRatio >= 1.20f -> 1f
+            legSpreadRatio >= 1.10f -> 0.6f
+            else -> 0f
+        }
+        val legStraightScore = ((minOf(leftKneeAngle, rightKneeAngle) - 130f) / 40f).coerceIn(0f, 1f)
+        val jjScore = armsOverHeadScore + legSpreadScore + legStraightScore
+        val isJumpingJack = jjScore >= 2.0f
+
+        // 扎马步评分制
+        val horseSpreadRatio = ankleWidth / refShoulder
+        val horseSpreadScore = when {
+            horseSpreadRatio >= 1.25f -> 1f
+            horseSpreadRatio >= 1.15f -> 0.6f
+            else -> 0f
+        }
+        val horseKneeScore = scoreRange(minOf(leftKneeAngle, rightKneeAngle), 85f, 135f, 10f)
+        val horseHipScore = scoreRange(minOf(leftHipAngle, rightHipAngle), 145f, 175f, 10f)
+        val horseAlignScore = scoreRange((abs(leftKneeY - rightKneeY)), 0f, refHeight * 0.10f, refHeight * 0.05f, invert = true)
+        val horseScore = horseSpreadScore + horseKneeScore + horseHipScore + horseAlignScore
+        val isHorseStanceScore = horseScore >= 2.2f
+
+        // 深蹲评分制（避免误判扎马步）：脚不过宽 + 膝弯明显 + 髋折叠
+        val squatWidthScore = scoreRange(ankleWidth / refShoulder, 1.0f, 1.18f, 0.08f, invert = true)
+        val squatKneeScore = scoreRange(minOf(leftKneeAngle, rightKneeAngle), 50f, 125f, 15f, invert = true)
+        val squatHipScore = scoreRange(minOf(leftHipAngle, rightHipAngle), 120f, 150f, 10f, invert = true)
+        val squatScore = squatWidthScore + squatKneeScore + squatHipScore
+        val isSquatScore = squatScore >= 2.0f
+
+        Log.d("ActionDetector", "JJ score=$jjScore, Horse score=$horseScore, Squat score=$squatScore")
 
         // 根据条件判断动作
         return when {
-            isSquatting -> {
+            isJumpingJack -> {
+                val corrections = mutableListOf<String>()
+                if (armsOverHeadScore < 1f) corrections.add("双手再抬高，接近头顶上方")
+                if (legSpreadScore < 1f) corrections.add("双脚再分开一些")
+                if (legStraightScore < 0.8f) corrections.add("双腿尽量伸直")
+                ActionResult(StandardAction.JUMPING_JACK, (0.6f + jjScore * 0.15f).coerceAtMost(0.95f), corrections)
+            }
+            isHorseStanceScore -> {
+                val corrections = mutableListOf<String>()
+                if (horseSpreadScore < 1f) corrections.add("双脚再分开一些")
+                if (horseKneeScore < 1f) corrections.add("膝盖弯曲到接近直角")
+                if (horseHipScore < 1f) corrections.add("上身保持直立")
+                if (horseAlignScore < 0.8f) corrections.add("左右膝高度保持一致")
+                ActionResult(StandardAction.HORSE_STANCE, (0.6f + horseScore * 0.15f).coerceAtMost(0.95f), corrections)
+            }
+            isSquatScore -> {
                 val corrections = mutableListOf<String>()
                 if (abs(leftKneeAngle - rightKneeAngle) > 20) corrections.add("保持双腿弯曲程度一致")
-                ActionResult(StandardAction.SQUATTING, 0.90f, corrections)
+                if (squatWidthScore < 0.8f) corrections.add("双脚稍收拢，避免过宽")
+                if (squatHipScore < 0.8f) corrections.add("臀部下沉，髋部再折叠")
+                ActionResult(StandardAction.SQUATTING, (0.6f + squatScore * 0.15f).coerceAtMost(0.9f), corrections)
             }
             isArmsExtended -> {
                 val corrections = mutableListOf<String>()
-                // 检查举臂姿势的标准性
                 if (abs(leftWristY - rightWristY) > 30) corrections.add("两手保持同一高度")
                 if (abs(leftShoulderY - rightShoulderY) > 20) corrections.add("保持肩膀水平")
                 if (abs(leftWristY - leftShoulderY) > 50) corrections.add("手臂再平一些")
                 if (abs(rightWristY - rightShoulderY) > 50) corrections.add("手臂再平一些")
                 ActionResult(StandardAction.ARMS_EXTENDED, 0.90f, corrections)
             }
-            
+
             isStanding -> {
                 val corrections = mutableListOf<String>()
-                // 检查站姿的标准性
                 if (abs(leftKneeY - rightKneeY) > 30) corrections.add("两腿保持同一高度")
                 if (abs(leftHipY - rightHipY) > 20) corrections.add("保持臀部水平")
                 if (torsoLength < 50) corrections.add("挺直身体")
                 ActionResult(StandardAction.STANDING, 0.90f, corrections)
             }
 
-            else -> {
-                ActionResult(StandardAction.UNKNOWN, 0f, listOf("姿势不标准，请站立或水平举臂"))
+            else -> ActionResult(StandardAction.UNKNOWN, 0f, listOf("姿势不标准，请调整"))
+        }
+    }
+
+    private fun scoreRange(value: Float, low: Float, high: Float, soft: Float, invert: Boolean = false): Float {
+        // invert=false: 低于low或高于high得0，进入区间缓升，完全在区间中得1；soft为过渡带
+        // invert=true: 反向得分，越小越好
+        return if (!invert) {
+            when {
+                value < low - soft || value > high + soft -> 0f
+                value in low..high -> 1f
+                value < low -> 1f - ((low - value) / soft).coerceIn(0f, 1f)
+                else -> 1f - ((value - high) / soft).coerceIn(0f, 1f)
+            }
+        } else {
+            when {
+                value <= low -> 1f
+                value >= high + soft -> 0f
+                value <= high -> 1f - ((value - low) / (high - low)).coerceIn(0f, 1f)
+                else -> 1f - ((value - high) / soft).coerceIn(0f, 1f)
             }
         }
+    }
+
+    private fun scoreOverHead(wristY: Float, shoulderY: Float, noseY: Float, refHeight: Float): Float {
+        // 手比肩至少高 refHeight*0.05，接近或高过头顶得满分
+        val shoulderGap = shoulderY - wristY
+        val headGap = noseY - wristY
+        val need = refHeight * 0.05f
+        val shoulderScore = ((shoulderGap - need) / (refHeight * 0.05f)).coerceIn(0f, 1f)
+        val headScore = (headGap / (refHeight * 0.05f)).coerceIn(0f, 1f)
+        return (shoulderScore * 0.6f + headScore * 0.4f).coerceIn(0f, 1f)
     }
 
     private fun getDistance(p1: KeyPoint?, p2: KeyPoint?): Float {
@@ -188,6 +309,8 @@ class ActionDetector {
     fun getStandardPose(action: StandardAction, width: Float, height: Float): List<KeyPoint> {
         return when (action) {
             StandardAction.SQUATTING -> getStandardSquatPose(width, height)
+            StandardAction.JUMPING_JACK -> getStandardJumpingJackPose(width, height)
+            StandardAction.HORSE_STANCE -> getStandardHorseStancePose(width, height)
             StandardAction.ARMS_EXTENDED -> getStandardArmsExtendedPose(width, height)
             StandardAction.ARMS_RAISED -> getStandardArmsRaisedPose(width, height)
             StandardAction.HANDS_ON_HIPS -> getStandardHandsOnHipsPose(width, height)
@@ -235,6 +358,46 @@ class ActionDetector {
             KeyPoint(BodyPart.RIGHT_KNEE, Pair(centerX + 50, height * 0.65f), 1f),
             KeyPoint(BodyPart.LEFT_ANKLE, Pair(centerX - 50, height * 0.75f), 1f),
             KeyPoint(BodyPart.RIGHT_ANKLE, Pair(centerX + 50, height * 0.75f), 1f)
+        )
+    }
+
+    private fun getStandardJumpingJackPose(width: Float, height: Float): List<KeyPoint> {
+        val centerX = width / 2
+        val spread = width * 0.22f
+        return listOf(
+            KeyPoint(BodyPart.NOSE, Pair(centerX, height * 0.15f), 1f),
+            KeyPoint(BodyPart.LEFT_SHOULDER, Pair(centerX - 70, height * 0.25f), 1f),
+            KeyPoint(BodyPart.RIGHT_SHOULDER, Pair(centerX + 70, height * 0.25f), 1f),
+            KeyPoint(BodyPart.LEFT_ELBOW, Pair(centerX - 70, height * 0.10f), 1f),
+            KeyPoint(BodyPart.RIGHT_ELBOW, Pair(centerX + 70, height * 0.10f), 1f),
+            KeyPoint(BodyPart.LEFT_WRIST, Pair(centerX - 70, height * 0.02f), 1f),
+            KeyPoint(BodyPart.RIGHT_WRIST, Pair(centerX + 70, height * 0.02f), 1f),
+            KeyPoint(BodyPart.LEFT_HIP, Pair(centerX - 60, height * 0.50f), 1f),
+            KeyPoint(BodyPart.RIGHT_HIP, Pair(centerX + 60, height * 0.50f), 1f),
+            KeyPoint(BodyPart.LEFT_KNEE, Pair(centerX - spread, height * 0.70f), 1f),
+            KeyPoint(BodyPart.RIGHT_KNEE, Pair(centerX + spread, height * 0.70f), 1f),
+            KeyPoint(BodyPart.LEFT_ANKLE, Pair(centerX - spread, height * 0.90f), 1f),
+            KeyPoint(BodyPart.RIGHT_ANKLE, Pair(centerX + spread, height * 0.90f), 1f)
+        )
+    }
+
+    private fun getStandardHorseStancePose(width: Float, height: Float): List<KeyPoint> {
+        val centerX = width / 2
+        val spread = width * 0.20f
+        return listOf(
+            KeyPoint(BodyPart.NOSE, Pair(centerX, height * 0.18f), 1f),
+            KeyPoint(BodyPart.LEFT_SHOULDER, Pair(centerX - 60, height * 0.28f), 1f),
+            KeyPoint(BodyPart.RIGHT_SHOULDER, Pair(centerX + 60, height * 0.28f), 1f),
+            KeyPoint(BodyPart.LEFT_ELBOW, Pair(centerX - 80, height * 0.40f), 1f),
+            KeyPoint(BodyPart.RIGHT_ELBOW, Pair(centerX + 80, height * 0.40f), 1f),
+            KeyPoint(BodyPart.LEFT_WRIST, Pair(centerX - 70, height * 0.50f), 1f),
+            KeyPoint(BodyPart.RIGHT_WRIST, Pair(centerX + 70, height * 0.50f), 1f),
+            KeyPoint(BodyPart.LEFT_HIP, Pair(centerX - 70, height * 0.55f), 1f),
+            KeyPoint(BodyPart.RIGHT_HIP, Pair(centerX + 70, height * 0.55f), 1f),
+            KeyPoint(BodyPart.LEFT_KNEE, Pair(centerX - spread, height * 0.70f), 1f),
+            KeyPoint(BodyPart.RIGHT_KNEE, Pair(centerX + spread, height * 0.70f), 1f),
+            KeyPoint(BodyPart.LEFT_ANKLE, Pair(centerX - spread, height * 0.90f), 1f),
+            KeyPoint(BodyPart.RIGHT_ANKLE, Pair(centerX + spread, height * 0.90f), 1f)
         )
     }
 

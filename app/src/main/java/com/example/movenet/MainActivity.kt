@@ -16,12 +16,14 @@ import com.example.movenet.databinding.ActivityMainBinding
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.Locale
+import kotlin.math.max
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var poseDetector: PoseDetector
     private lateinit var actionDetector: ActionDetector
+    private val actionSmoother = ActionSmoother(windowSize = 4, minAgree = 3, holdMs = 400L)
     private var camera: Camera? = null
     
     // TTS相关
@@ -35,17 +37,17 @@ class MainActivity : AppCompatActivity() {
     private val historySize = 5 // 保留最近5帧的动作判定
 
     // 可视化稳定：降低重绘频率 + 关键点平滑 + 短暂丢帧保持（减少“闪动/抖动”观感）
-    private val uiMaxFps = 30
+    private val uiMaxFps = 60
     private val uiFrameIntervalMs = 1000L / uiMaxFps
     private var lastUiUpdateAtMs: Long = 0L
 
-    private val visualHoldMs = 200L
+    private val visualHoldMs = 320L
     private var lastNonEmptyVisualAtMs: Long = 0L
     private var lastNonEmptyPersons: List<Person> = emptyList()
     private var lastNonEmptyActionResults: List<ActionResult> = emptyList()
 
     private val poseSmoother = PoseSmoother(
-        alpha = 0.35f,
+        alpha = 0.30f,
         minScore = 0.2f
     )
 
@@ -59,10 +61,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        // 设置Toolbar
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayShowTitleEnabled(false) // 隐藏默认标题
 
         // 初始化姿态检测器
         poseDetector = PoseDetector(this)
@@ -155,13 +153,16 @@ class MainActivity : AppCompatActivity() {
             )
             
             // 检测每个人的动作
-            val actionResults = poseResult.persons.map { person ->
+            val rawActionResults = poseResult.persons.map { person ->
                 actionDetector.detectAction(person)
             }
+
+            // 进一步平滑动作结果，减少闪跳
+            val stableActionResults = actionSmoother.update(rawActionResults)
             
-            // 朗读第一个人的动作（如果检测到）
-            if (actionResults.isNotEmpty()) {
-                speakActionResult(actionResults[0])
+            // 朗读第一个人的动作（使用平滑后的结果）
+            if (stableActionResults.isNotEmpty()) {
+                speakActionResult(stableActionResults[0])
             }
             
             // 更新可视化
@@ -176,11 +177,10 @@ class MainActivity : AppCompatActivity() {
 
                 // 2) 短暂丢帧保持：模型偶发返回空结果时，继续显示上一次结果一小段时间
                 val rawPersons = poseResult.persons
-                val rawActionResults = actionResults
 
                 val visualPersons = if (rawPersons.isNotEmpty()) {
                     lastNonEmptyPersons = rawPersons
-                    lastNonEmptyActionResults = rawActionResults
+                    lastNonEmptyActionResults = stableActionResults
                     lastNonEmptyVisualAtMs = nowMs
                     rawPersons
                 } else if (nowMs - lastNonEmptyVisualAtMs <= visualHoldMs) {
@@ -191,7 +191,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val visualActionResults = if (rawPersons.isNotEmpty()) {
-                    rawActionResults
+                    stableActionResults
                 } else if (nowMs - lastNonEmptyVisualAtMs <= visualHoldMs) {
                     lastNonEmptyActionResults
                 } else {
@@ -209,18 +209,6 @@ class MainActivity : AppCompatActivity() {
                         poseResult.srcWidth,
                         poseResult.srcHeight,
                         imageProxy.imageInfo.rotationDegrees,
-                        /*isMirrored=*/true
-                    )
-                    postInvalidateOnAnimation()
-                }
-                
-                // 更新下半部分的关键点视图
-                binding.keyPointView.apply {
-                    setResults(smoothedPersons)
-                    setActionResults(visualActionResults)
-                    setImageSourceInfo(
-                        poseResult.srcWidth,
-                        poseResult.srcHeight,
                         /*isMirrored=*/true
                     )
                     postInvalidateOnAnimation()
@@ -278,6 +266,61 @@ class MainActivity : AppCompatActivity() {
             return result
         }
     }
+
+    // 平滑动作识别结果，减少标签来回跳变
+    private class ActionSmoother(
+        private val windowSize: Int,
+        private val minAgree: Int,
+        private val holdMs: Long
+    ) {
+        private data class State(
+            val history: ArrayDeque<StandardAction> = ArrayDeque(),
+            var lastStable: ActionResult? = null,
+            var lastStableAt: Long = 0L
+        )
+
+        private val states: MutableMap<Int, State> = mutableMapOf()
+
+        fun update(results: List<ActionResult>): List<ActionResult> {
+            val now = SystemClock.uptimeMillis()
+            val output = mutableListOf<ActionResult>()
+
+            results.forEachIndexed { index, result ->
+                val state = states.getOrPut(index) { State() }
+                val history = state.history
+
+                history.addLast(result.action)
+                if (history.size > windowSize) history.removeFirst()
+
+                val top = history.groupingBy { it }.eachCount().maxByOrNull { it.value }
+                val stableAction = top?.key
+                val stableCount = top?.value ?: 0
+                val isStable = stableAction != null && stableAction != StandardAction.UNKNOWN && stableCount >= minAgree
+
+                val finalResult = when {
+                    isStable -> {
+                        val stabilized = result.copy(
+                            action = stableAction,
+                            confidence = max(result.confidence, 0.8f)
+                        )
+                        state.lastStable = stabilized
+                        state.lastStableAt = now
+                        stabilized
+                    }
+                    state.lastStable != null && now - state.lastStableAt <= holdMs -> state.lastStable!!
+                    else -> result
+                }
+
+                output.add(finalResult)
+            }
+
+            val maxIndex = results.lastIndex
+            val stale = states.keys.filter { it > maxIndex }
+            stale.forEach { states.remove(it) }
+
+            return output
+        }
+    }
     
     private fun speakActionResult(result: ActionResult) {
         // 添加到动作历史
@@ -316,6 +359,8 @@ class MainActivity : AppCompatActivity() {
             StandardAction.STANDING -> "站立"
             StandardAction.SQUATTING -> "深蹲"
             StandardAction.ARMS_EXTENDED -> "水平举臂"
+            StandardAction.JUMPING_JACK -> "开合跳"
+            StandardAction.HORSE_STANCE -> "扎马步"
             StandardAction.UNKNOWN -> "未知动作"
             else -> return
         }

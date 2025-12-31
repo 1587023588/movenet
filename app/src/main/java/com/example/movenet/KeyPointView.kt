@@ -28,14 +28,14 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
     private val paintLine = Paint().apply {
         color = Color.CYAN
         style = Paint.Style.STROKE
-        strokeWidth = 6f
+        strokeWidth = 9f
         isAntiAlias = true
     }
 
     private val paintArmLine = Paint().apply {
         color = Color.RED
         style = Paint.Style.STROKE
-        strokeWidth = 6f
+        strokeWidth = 9f
         isAntiAlias = true
     }
 
@@ -141,6 +141,8 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
             val actionName = when (result.action) {
                 StandardAction.STANDING -> "站立"
                 StandardAction.SQUATTING -> "深蹲"
+                StandardAction.JUMPING_JACK -> "开合跳"
+                StandardAction.HORSE_STANCE -> "扎马步"
                 StandardAction.ARMS_EXTENDED -> "水平举臂"
                 else -> "检测中..."
             }
@@ -187,8 +189,8 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
                 if (keyPoint.score > 0.2f) {
                     val (x, y) = mapPoint(keyPoint.coordinate.first, keyPoint.coordinate.second, scale, dx, dy)
                     
-                    val radius = 6f + (keyPoint.score * 10f)
-                    val alpha = (keyPoint.score * 255).toInt().coerceIn(80, 255)
+                    val radius = 8f + (keyPoint.score * 10f)
+                    val alpha = (keyPoint.score * 255).toInt().coerceIn(120, 255)
                     
                     if (keyPoint.bodyPart == BodyPart.LEFT_WRIST || keyPoint.bodyPart == BodyPart.RIGHT_WRIST ||
                         keyPoint.bodyPart == BodyPart.LEFT_ELBOW || keyPoint.bodyPart == BodyPart.RIGHT_ELBOW) {
