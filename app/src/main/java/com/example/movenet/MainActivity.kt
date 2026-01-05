@@ -42,8 +42,10 @@ class MainActivity : AppCompatActivity() {
     private var jumpingJackCount = 0
     private var lastCountedAction: StandardAction? = null
     private var lastCountedAt: Long = 0L
-    private val countCooldownMs = 450L  // 放宽冷却，提升计数触发率
+    private val countCooldownMs = 500L   // 适中冷却，兼顾防抖与灵敏度
     private var squatInProgress = false
+    private var squatEnteredAt: Long = 0L
+    private val minSquatHoldMs = 250L    // 深蹲至少保持250ms才计一次
     
     // 动作稳定性检查
     private var actionHistory = mutableListOf<StandardAction>()
@@ -393,7 +395,10 @@ class MainActivity : AppCompatActivity() {
         val canCount = now - lastCountedAt >= countCooldownMs
         when (action) {
             StandardAction.SQUATTING -> {
-                squatInProgress = true
+                if (!squatInProgress) {
+                    squatInProgress = true
+                    squatEnteredAt = now
+                }
                 lastCountedAction = action
             }
             StandardAction.JUMPING_JACK -> {
@@ -405,8 +410,8 @@ class MainActivity : AppCompatActivity() {
                 lastCountedAction = action
             }
             else -> {
-                // 完成深蹲：从SQUATTING返回站立或其他动作时计一次
-                if (squatInProgress && canCount && action == StandardAction.STANDING) {
+                // 完成深蹲：从SQUATTING返回非SQUATTING状态时计一次（允许短暂UNKNOWN抖动），且深蹲持续足够长
+                if (squatInProgress && canCount && lastCountedAction == StandardAction.SQUATTING && action != StandardAction.SQUATTING && now - squatEnteredAt >= minSquatHoldMs) {
                     squatCount++
                     lastCountedAt = now
                     Log.d(TAG, "Squat count: $squatCount")
@@ -419,6 +424,7 @@ class MainActivity : AppCompatActivity() {
     
     private fun speakActionResult(result: ActionResult) {
         if (result.action == StandardAction.ARMS_EXTENDED) return  // 水平举臂不播报
+        if (result.action == StandardAction.STANDING) return  // 站立不播报
 
         // 添加到动作历史
         actionHistory.add(result.action)
