@@ -158,6 +158,8 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
         val dx = (width - scaledWidth) / 2f
         val dy = (height - scaledHeight) / 2f
         
+        android.util.Log.d("KeyPointView", "Canvas: ${width}x${height}, Image: ${imageWidth}x${imageHeight}, scale=$scale, isMirrored=$isMirrored")
+        
         persons.forEachIndexed { index, person ->
             // 绘制骨架连线
             bodyJoints.forEach { (start, end) ->
@@ -188,6 +190,11 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
             person.keyPoints.forEach { keyPoint ->
                 if (keyPoint.score > 0.2f) {
                     val (x, y) = mapPoint(keyPoint.coordinate.first, keyPoint.coordinate.second, scale, dx, dy)
+                    
+                    // 调试：打印前5个关键点
+                    if (person.keyPoints.indexOf(keyPoint) < 5) {
+                        android.util.Log.d("KeyPointView", "KP ${keyPoint.bodyPart}: 原始=(${keyPoint.coordinate.first.toInt()}, ${keyPoint.coordinate.second.toInt()}), 映射后=(${x.toInt()}, ${y.toInt()}), score=${keyPoint.score}")
+                    }
                     
                     val radius = 8f + (keyPoint.score * 10f)
                     val alpha = (keyPoint.score * 255).toInt().coerceIn(120, 255)

@@ -21,35 +21,52 @@ import kotlin.math.max
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var cameraExecutor: ExecutorService
-    private lateinit var poseDetector: PoseDetector
+    private lateinit var poseDetector: YoloOnnxPoseDetector  // 使用ONNX Runtime版本的YOLO
     private lateinit var actionDetector: ActionDetector
-    private val actionSmoother = ActionSmoother(windowSize = 4, minAgree = 3, holdMs = 400L)
+    private val actionSmoother = ActionSmoother(windowSize = 3, minAgree = 2, holdMs = 250L)  // 减少窗口和保持时间
     private var camera: Camera? = null
+    
+    // ========== 性能测试开关 ==========
+    // 设置为true时，跳过所有平滑/保持/过滤，直接显示原始检测结果
+    private val RAW_DETECTION_MODE = true  // 改为false恢复完整功能
+    // ==================================
     
     // TTS相关
     private var textToSpeech: TextToSpeech? = null
     private var lastSpokenAction: StandardAction? = null
     private var lastSpeechTime: Long = 0
     private val speechInterval = 2000L // 2秒间隔，快速响应
+
+    // 计数
+    private var squatCount = 0
+    private var jumpingJackCount = 0
+    private var lastCountedAction: StandardAction? = null
+    private var lastCountedAt: Long = 0L
+    private val countCooldownMs = 700L
     
     // 动作稳定性检查
     private var actionHistory = mutableListOf<StandardAction>()
-    private val historySize = 5 // 保留最近5帧的动作判定
+    private val historySize = 3 // 减少到3帧，加快响应
 
-    // 可视化稳定：降低重绘频率 + 关键点平滑 + 短暂丢帧保持（减少“闪动/抖动”观感）
-    private val uiMaxFps = 60
+    // 可视化优化：提高响应速度
+    private val uiMaxFps = 90  // 提高到90fps限制，更流畅
     private val uiFrameIntervalMs = 1000L / uiMaxFps
     private var lastUiUpdateAtMs: Long = 0L
 
-    private val visualHoldMs = 320L
+    private val visualHoldMs = 150L  // 减少保持时间到150ms
     private var lastNonEmptyVisualAtMs: Long = 0L
     private var lastNonEmptyPersons: List<Person> = emptyList()
     private var lastNonEmptyActionResults: List<ActionResult> = emptyList()
 
     private val poseSmoother = PoseSmoother(
-        alpha = 0.30f,
+        alpha = 0.50f,  // 提高alpha让关键点响应更快
         minScore = 0.2f
     )
+    
+    // FPS计算
+    private var frameCount = 0
+    private var lastFpsTime = System.currentTimeMillis()
+    private var currentFps = 0f
 
     companion object {
         private const val TAG = "MoveNetApp"
@@ -62,8 +79,19 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // 初始化姿态检测器
-        poseDetector = PoseDetector(this)
+        // 初始化姿态检测器 - 使用YOLO ONNX Runtime
+        try {
+            Log.d(TAG, "========== MainActivity开始初始化YOLO检测器 ==========")
+            poseDetector = YoloOnnxPoseDetector(this)
+            Log.d(TAG, "========== YOLO检测器初始化完成 ==========")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌❌❌ 创建YoloOnnxPoseDetector失败 ❌❌❌", e)
+            Log.e(TAG, "错误类型: ${e.javaClass.name}")
+            Log.e(TAG, "错误信息: ${e.message}")
+            Log.e(TAG, "堆栈信息: ${e.stackTraceToString()}")
+            Toast.makeText(this, "YOLO初始化失败: ${e.message}", Toast.LENGTH_LONG).show()
+            throw e
+        }
 
         // 初始化动作检测器
         actionDetector = ActionDetector()
@@ -157,59 +185,95 @@ class MainActivity : AppCompatActivity() {
                 actionDetector.detectAction(person)
             }
 
-            // 进一步平滑动作结果，减少闪跳
-            val stableActionResults = actionSmoother.update(rawActionResults)
+            // 根据模式选择处理方式
+            val stableActionResults = if (RAW_DETECTION_MODE) {
+                rawActionResults  // 纯检测模式：直接使用原始结果
+            } else {
+                actionSmoother.update(rawActionResults)  // 正常模式：应用平滑
+            }
             
-            // 朗读第一个人的动作（使用平滑后的结果）
+            // 计数与播报（仅第一个人）
             if (stableActionResults.isNotEmpty()) {
+                updateCounters(stableActionResults[0])
                 speakActionResult(stableActionResults[0])
             }
             
             // 更新可视化
             runOnUiThread {
-                val nowMs = SystemClock.uptimeMillis()
-
+                val nowMs = SystemClock.uptimeMillis()                
+                // 计算FPS
+                frameCount++
+                val currentTime = System.currentTimeMillis()
+                val elapsed = currentTime - lastFpsTime
+                if (elapsed >= 1000) {
+                    currentFps = frameCount * 1000f / elapsed
+                    frameCount = 0
+                    lastFpsTime = currentTime
+                }
                 // 1) 限制UI重绘频率（默认30fps），减少高频跳变带来的“闪动”
                 if (nowMs - lastUiUpdateAtMs < uiFrameIntervalMs) {
                     return@runOnUiThread
                 }
                 lastUiUpdateAtMs = nowMs
 
-                // 2) 短暂丢帧保持：模型偶发返回空结果时，继续显示上一次结果一小段时间
-                val rawPersons = poseResult.persons
-
-                val visualPersons = if (rawPersons.isNotEmpty()) {
-                    lastNonEmptyPersons = rawPersons
-                    lastNonEmptyActionResults = stableActionResults
-                    lastNonEmptyVisualAtMs = nowMs
-                    rawPersons
-                } else if (nowMs - lastNonEmptyVisualAtMs <= visualHoldMs) {
-                    lastNonEmptyPersons
+                // 根据模式选择处理方式
+                val visualPersons: List<Person>
+                val visualActionResults: List<ActionResult>
+                
+                if (RAW_DETECTION_MODE) {
+                    // 纯检测模式：直接使用原始结果，无平滑无保持
+                    visualPersons = poseResult.persons
+                    visualActionResults = stableActionResults
                 } else {
-                    poseSmoother.reset()
-                    emptyList()
+                    // 正常模式：应用丢帧保持和平滑
+                    val rawPersons = poseResult.persons
+
+                    visualPersons = if (rawPersons.isNotEmpty()) {
+                        lastNonEmptyPersons = rawPersons
+                        lastNonEmptyActionResults = stableActionResults
+                        lastNonEmptyVisualAtMs = nowMs
+                        rawPersons
+                    } else if (nowMs - lastNonEmptyVisualAtMs <= visualHoldMs) {
+                        lastNonEmptyPersons
+                    } else {
+                        poseSmoother.reset()
+                        emptyList()
+                    }
+
+                    visualActionResults = if (rawPersons.isNotEmpty()) {
+                        stableActionResults
+                    } else if (nowMs - lastNonEmptyVisualAtMs <= visualHoldMs) {
+                        lastNonEmptyActionResults
+                    } else {
+                        emptyList()
+                    }
                 }
 
-                val visualActionResults = if (rawPersons.isNotEmpty()) {
-                    stableActionResults
-                } else if (nowMs - lastNonEmptyVisualAtMs <= visualHoldMs) {
-                    lastNonEmptyActionResults
+                // 3) 关键点平滑（仅在正常模式）
+                val smoothedPersons = if (RAW_DETECTION_MODE) {
+                    visualPersons  // 纯检测模式：不平滑
                 } else {
-                    emptyList()
+                    poseSmoother.smooth(visualPersons)  // 正常模式：应用平滑
                 }
 
-                // 3) 关键点指数平滑（EMA）：显著降低手/肘等点位抖动
-                val smoothedPersons = poseSmoother.smooth(visualPersons)
+                // 4) 旋转90/270时，原始图像宽高需要互换才能与预览比例一致
+                val (alignedWidth, alignedHeight) = if (imageProxy.imageInfo.rotationDegrees % 180 == 0) {
+                    poseResult.srcWidth to poseResult.srcHeight
+                } else {
+                    poseResult.srcHeight to poseResult.srcWidth
+                }
 
                 // 更新上半部分的骨架覆盖层
                 binding.overlay.apply {
                     setResults(smoothedPersons)
                     setActionResults(visualActionResults)
+                    setCounts(squatCount, jumpingJackCount)
+                    setFps(currentFps)
                     setImageSourceInfo(
-                        poseResult.srcWidth,
-                        poseResult.srcHeight,
+                        alignedWidth,
+                        alignedHeight,
                         imageProxy.imageInfo.rotationDegrees,
-                        /*isMirrored=*/true
+                        /*isMirrored=*/true   // 前置摄像头预览默认镜像，叠加层也需要镜像才能对齐
                     )
                     postInvalidateOnAnimation()
                 }
@@ -321,8 +385,37 @@ class MainActivity : AppCompatActivity() {
             return output
         }
     }
+
+    private fun updateCounters(result: ActionResult) {
+        val action = result.action
+        val now = SystemClock.uptimeMillis()
+        val canCount = now - lastCountedAt >= countCooldownMs
+        when (action) {
+            StandardAction.SQUATTING -> {
+                if (canCount && lastCountedAction != action) {
+                    squatCount++
+                    Log.d(TAG, "Squat count: $squatCount")
+                    lastCountedAt = now
+                }
+                lastCountedAction = action
+            }
+            StandardAction.JUMPING_JACK -> {
+                if (canCount && lastCountedAction != action) {
+                    jumpingJackCount++
+                    Log.d(TAG, "Jumping jack count: $jumpingJackCount")
+                    lastCountedAt = now
+                }
+                lastCountedAction = action
+            }
+            else -> {
+                lastCountedAction = null
+            }
+        }
+    }
     
     private fun speakActionResult(result: ActionResult) {
+        if (result.action == StandardAction.ARMS_EXTENDED) return  // 水平举臂不播报
+
         // 添加到动作历史
         actionHistory.add(result.action)
         if (actionHistory.size > historySize) {
@@ -334,12 +427,12 @@ class MainActivity : AppCompatActivity() {
             return // 还没有足够的历史数据
         }
         
-        // 检查动作是否稳定（最近5帧至少有4帧是同一个动作）
+        // 检查动作是否稳定（最近3帧至少有2帧是同一个动作）
         val actionCounts = actionHistory.groupingBy { it }.eachCount()
         val stableAction = actionCounts.maxByOrNull { it.value }?.key
         val stableCount = actionCounts.maxByOrNull { it.value }?.value ?: 0
         
-        if (stableCount < 4 || stableAction == StandardAction.UNKNOWN) {
+        if (stableCount < 2 || stableAction == StandardAction.UNKNOWN) {
             return // 动作不稳定或未知
         }
         
@@ -358,22 +451,14 @@ class MainActivity : AppCompatActivity() {
         val actionName = when (stableAction) {
             StandardAction.STANDING -> "站立"
             StandardAction.SQUATTING -> "深蹲"
-            StandardAction.ARMS_EXTENDED -> "水平举臂"
+            //StandardAction.ARMS_EXTENDED -> "水平举臂"
             StandardAction.JUMPING_JACK -> "开合跳"
             StandardAction.HORSE_STANCE -> "扎马步"
             StandardAction.UNKNOWN -> "未知动作"
             else -> return
         }
         
-        val speechText = buildString {
-            append("当前动作")
-            append(actionName)
-            
-            if (result.corrections.isNotEmpty()) {
-                append("，")
-                append(result.corrections.joinToString("，"))
-            }
-        }
+        val speechText = "当前动作$actionName"
         
         // 朗读
         textToSpeech?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, null)

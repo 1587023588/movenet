@@ -71,6 +71,17 @@ class ActionDetector {
         val leftAnkleX = keyPointMap[BodyPart.LEFT_ANKLE]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
         val rightAnkleX = keyPointMap[BodyPart.RIGHT_ANKLE]?.coordinate?.first ?: return ActionResult(StandardAction.UNKNOWN, 0f)
 
+        // 脚部关键点置信度过低时不进行识别，避免下肢缺失造成误判
+        val footScoreThreshold = 0.35f
+        val leftAnkleScore = keyPointMap[BodyPart.LEFT_ANKLE]?.score ?: 0f
+        val rightAnkleScore = keyPointMap[BodyPart.RIGHT_ANKLE]?.score ?: 0f
+        val leftKneeScore = keyPointMap[BodyPart.LEFT_KNEE]?.score ?: 0f
+        val rightKneeScore = keyPointMap[BodyPart.RIGHT_KNEE]?.score ?: 0f
+        if (leftAnkleScore < footScoreThreshold || rightAnkleScore < footScoreThreshold ||
+            leftKneeScore < 0.25f || rightKneeScore < 0.25f) {
+            return ActionResult(StandardAction.UNKNOWN, 0f, listOf("下肢关键点置信度过低"))
+        }
+
         val shoulderY = (leftShoulderY + rightShoulderY) / 2
         val wristY = (leftWristY + rightWristY) / 2
         val hipY = (leftHipY + rightHipY) / 2
@@ -111,6 +122,7 @@ class ActionDetector {
         val rightArmHorizontal = abs(rightWristY - rightShoulderY) < 40 // 右手腕与肩膀Y坐标接近（水平）
         val leftArmExtended = abs(leftWristX - leftShoulderX) > shoulderWidth * 0.8 // 左臂向外伸展
         val rightArmExtended = abs(rightWristX - rightShoulderX) > shoulderWidth * 0.8 // 右臂向外伸展
+        val wristsAboveShoulder = leftWristY < shoulderY - refHeight * 0.05f && rightWristY < shoulderY - refHeight * 0.05f
         
         // 调试日志
         Log.d("ActionDetector", "肩宽=$shoulderWidth, 基准肩宽=$baselineShoulderWidth, 身高=$totalHeight, 基准身高=$baselineHeight")
@@ -157,33 +169,39 @@ class ActionDetector {
         val armsOverHeadScore = scoreOverHead(wristY = wristY, shoulderY = shoulderY, noseY = noseY, refHeight = refHeight)
         val legSpreadRatio = ankleWidth / refShoulder
         val legSpreadScore = when {
-            legSpreadRatio >= 1.20f -> 1f
-            legSpreadRatio >= 1.10f -> 0.6f
+            legSpreadRatio >= 1.22f -> 1f
+            legSpreadRatio >= 1.12f -> 0.6f
             else -> 0f
         }
         val legStraightScore = ((minOf(leftKneeAngle, rightKneeAngle) - 130f) / 40f).coerceIn(0f, 1f)
         val jjScore = armsOverHeadScore + legSpreadScore + legStraightScore
-        val isJumpingJack = jjScore >= 2.0f
-
-        // 扎马步评分制
-        val horseSpreadRatio = ankleWidth / refShoulder
-        val horseSpreadScore = when {
-            horseSpreadRatio >= 1.25f -> 1f
-            horseSpreadRatio >= 1.15f -> 0.6f
-            else -> 0f
-        }
-        val horseKneeScore = scoreRange(minOf(leftKneeAngle, rightKneeAngle), 85f, 135f, 10f)
-        val horseHipScore = scoreRange(minOf(leftHipAngle, rightHipAngle), 145f, 175f, 10f)
-        val horseAlignScore = scoreRange((abs(leftKneeY - rightKneeY)), 0f, refHeight * 0.10f, refHeight * 0.05f, invert = true)
-        val horseScore = horseSpreadScore + horseKneeScore + horseHipScore + horseAlignScore
-        val isHorseStanceScore = horseScore >= 2.2f
+        val isJumpingJack = armsOverHeadScore >= 0.65f && wristsAboveShoulder && legSpreadRatio >= 1.12f && jjScore >= 2.1f
 
         // 深蹲评分制（避免误判扎马步）：脚不过宽 + 膝弯明显 + 髋折叠
+        val isSquatNarrow = legSpreadRatio < 1.12f // 窄站距优先归为深蹲
         val squatWidthScore = scoreRange(ankleWidth / refShoulder, 1.0f, 1.18f, 0.08f, invert = true)
-        val squatKneeScore = scoreRange(minOf(leftKneeAngle, rightKneeAngle), 50f, 125f, 15f, invert = true)
-        val squatHipScore = scoreRange(minOf(leftHipAngle, rightHipAngle), 120f, 150f, 10f, invert = true)
+        val squatKneeScore = scoreRange(minOf(leftKneeAngle, rightKneeAngle), 55f, 130f, 16f, invert = true)
+        val squatHipScore = scoreRange(minOf(leftHipAngle, rightHipAngle), 115f, 150f, 10f, invert = true)
         val squatScore = squatWidthScore + squatKneeScore + squatHipScore
-        val isSquatScore = squatScore >= 2.0f
+        val isSquatScore = isSquatNarrow && squatScore >= 1.75f
+
+        // 扎马步评分制（依赖前面的深蹲评分以避免误判）
+        val horseSpreadRatio = ankleWidth / refShoulder
+        val horseSpreadScore = when {
+            horseSpreadRatio >= 1.24f -> 1f
+            horseSpreadRatio >= 1.14f -> 0.6f
+            else -> 0f
+        }
+        val horseKneeScore = scoreRange(minOf(leftKneeAngle, rightKneeAngle), 88f, 120f, 6f)
+        val horseHipScore = scoreRange(minOf(leftHipAngle, rightHipAngle), 158f, 178f, 6f)
+        val horseAlignScore = scoreRange((abs(leftKneeY - rightKneeY)), 0f, refHeight * 0.10f, refHeight * 0.05f, invert = true)
+        val horseDepthScore = scoreRange((kneeY - ankleY) / refHeight, 0.18f, 0.30f, 0.04f)
+        val horseScore = horseSpreadScore + horseKneeScore + horseHipScore + horseAlignScore + horseDepthScore
+        val squatGateStrong = squatWidthScore > 0.65f && squatKneeScore > 0.65f && squatHipScore > 0.65f
+        val isSquatLikely = squatScore >= 1.6f || squatGateStrong
+        val armsDown = !wristsAboveShoulder && armsOverHeadScore < 0.4f
+        val horseHardGate = armsDown && horseSpreadRatio >= 1.16f && horseKneeScore > 0.40f && horseHipScore > 0.40f && horseDepthScore > 0.40f
+        val isHorseStanceScore = (horseHardGate && horseScore >= 2.3f && !isSquatLikely)
 
         Log.d("ActionDetector", "JJ score=$jjScore, Horse score=$horseScore, Squat score=$squatScore")
 
@@ -191,7 +209,8 @@ class ActionDetector {
         return when {
             isJumpingJack -> {
                 val corrections = mutableListOf<String>()
-                if (armsOverHeadScore < 1f) corrections.add("双手再抬高，接近头顶上方")
+                if (!wristsAboveShoulder) corrections.add("双手举过肩再继续动作")
+                else if (armsOverHeadScore < 1f) corrections.add("双手再抬高，接近头顶上方")
                 if (legSpreadScore < 1f) corrections.add("双脚再分开一些")
                 if (legStraightScore < 0.8f) corrections.add("双腿尽量伸直")
                 ActionResult(StandardAction.JUMPING_JACK, (0.6f + jjScore * 0.15f).coerceAtMost(0.95f), corrections)

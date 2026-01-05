@@ -12,6 +12,9 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
     
     private var persons: List<Person> = emptyList()
     private var actionResults: List<ActionResult> = emptyList()
+    private var squatCount: Int = 0
+    private var jumpingJackCount: Int = 0
+    private var fps: Float = 0f
     private var imageWidth: Int = 1
     private var imageHeight: Int = 1
     private var rotation: Int = 0
@@ -120,6 +123,15 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
     fun setActionResults(actionResults: List<ActionResult>) {
         this.actionResults = actionResults
     }
+
+    fun setCounts(squat: Int, jumpingJack: Int) {
+        this.squatCount = squat
+        this.jumpingJackCount = jumpingJack
+    }
+    
+    fun setFps(fps: Float) {
+        this.fps = fps
+    }
     
     fun setImageSourceInfo(width: Int, height: Int, rotation: Int, isMirrored: Boolean) {
         this.imageWidth = width
@@ -131,9 +143,19 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         
+        // 绘制FPS（右上角）
+        val fpsText = String.format("FPS: %.1f", fps)
+        val fpsX = width - 150f
+        val fpsY = 60f
+        canvas.drawText(fpsText, fpsX, fpsY, paintText)
+
+        // 绘制计数（左上角，不与动作文字重叠）
+        canvas.drawText("深蹲: $squatCount", 30f, 50f, paintText)
+        canvas.drawText("开合跳: $jumpingJackCount", 30f, 90f, paintText)
+        
         if (persons.isEmpty()) {
             // 显示提示信息
-            canvas.drawText("检测中...", 30f, 60f, paintText)
+            canvas.drawText("检测中...", 30f, 140f, paintText)
             return
         }
         
@@ -210,8 +232,8 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
             }
             
             // 显示动作信息
-            if (actionResult != null) {
-                val yOffset = 60f
+            if (actionResult != null && actionResult.action != StandardAction.ARMS_EXTENDED) {
+                val yOffset = 140f  // 下移以避免与计数重叠
                 
                 // 显示检测到的动作
                 val actionName = when (actionResult.action) {

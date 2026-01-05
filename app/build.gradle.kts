@@ -36,6 +36,14 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    
+    // 添加NDK配置以支持ONNX Runtime
+    ndkVersion = "25.1.8937393"
+    defaultConfig {
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+        }
+    }
 }
 
 dependencies {
@@ -54,6 +62,9 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    
+    // ONNX Runtime for Android (用于YOLO)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
