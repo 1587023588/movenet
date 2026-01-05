@@ -42,7 +42,8 @@ class MainActivity : AppCompatActivity() {
     private var jumpingJackCount = 0
     private var lastCountedAction: StandardAction? = null
     private var lastCountedAt: Long = 0L
-    private val countCooldownMs = 700L
+    private val countCooldownMs = 450L  // 放宽冷却，提升计数触发率
+    private var squatInProgress = false
     
     // 动作稳定性检查
     private var actionHistory = mutableListOf<StandardAction>()
@@ -392,11 +393,7 @@ class MainActivity : AppCompatActivity() {
         val canCount = now - lastCountedAt >= countCooldownMs
         when (action) {
             StandardAction.SQUATTING -> {
-                if (canCount && lastCountedAction != action) {
-                    squatCount++
-                    Log.d(TAG, "Squat count: $squatCount")
-                    lastCountedAt = now
-                }
+                squatInProgress = true
                 lastCountedAction = action
             }
             StandardAction.JUMPING_JACK -> {
@@ -408,6 +405,13 @@ class MainActivity : AppCompatActivity() {
                 lastCountedAction = action
             }
             else -> {
+                // 完成深蹲：从SQUATTING返回站立或其他动作时计一次
+                if (squatInProgress && canCount && action == StandardAction.STANDING) {
+                    squatCount++
+                    lastCountedAt = now
+                    Log.d(TAG, "Squat count: $squatCount")
+                }
+                squatInProgress = false
                 lastCountedAction = null
             }
         }
