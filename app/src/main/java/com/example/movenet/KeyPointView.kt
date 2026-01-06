@@ -19,28 +19,30 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
     private var imageHeight: Int = 1
     private var isMirrored: Boolean = false
     
+    private val neonGreen = Color.parseColor("#7739FF14") // translucent neon green
+
     private val paintPoint = Paint().apply {
-        color = Color.GREEN
+        color = neonGreen
         style = Paint.Style.FILL
         isAntiAlias = true
     }
 
     private val paintLine = Paint().apply {
-        color = Color.CYAN
+        color = neonGreen
         style = Paint.Style.STROKE
-        strokeWidth = 9f
+        strokeWidth = 48f
         isAntiAlias = true
     }
 
     private val paintArmLine = Paint().apply {
-        color = Color.RED
+        color = neonGreen
         style = Paint.Style.STROKE
-        strokeWidth = 9f
+        strokeWidth = 48f
         isAntiAlias = true
     }
 
     private val paintHandPoint = Paint().apply {
-        color = Color.RED
+        color = neonGreen
         style = Paint.Style.FILL
         isAntiAlias = true
     }
@@ -90,11 +92,16 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
         setShadowLayer(5f, 0f, 0f, Color.BLACK)
     }
 
+    private val ignoredHeadParts = setOf(
+        BodyPart.LEFT_EYE,
+        BodyPart.RIGHT_EYE,
+        BodyPart.LEFT_EAR,
+        BodyPart.RIGHT_EAR
+    )
+
     private val bodyJoints = listOf(
-        Pair(BodyPart.NOSE, BodyPart.LEFT_EYE),
-        Pair(BodyPart.NOSE, BodyPart.RIGHT_EYE),
-        Pair(BodyPart.LEFT_EYE, BodyPart.LEFT_EAR),
-        Pair(BodyPart.RIGHT_EYE, BodyPart.RIGHT_EAR),
+        Pair(BodyPart.NOSE, BodyPart.LEFT_SHOULDER),
+        Pair(BodyPart.NOSE, BodyPart.RIGHT_SHOULDER),
         Pair(BodyPart.LEFT_SHOULDER, BodyPart.RIGHT_SHOULDER),
         Pair(BodyPart.LEFT_SHOULDER, BodyPart.LEFT_HIP),
         Pair(BodyPart.RIGHT_SHOULDER, BodyPart.RIGHT_HIP),
@@ -188,6 +195,8 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
 
             // 绘制关键点
             person.keyPoints.forEach { keyPoint ->
+                if (ignoredHeadParts.contains(keyPoint.bodyPart)) return@forEach
+
                 if (keyPoint.score > 0.2f) {
                     val (x, y) = mapPoint(keyPoint.coordinate.first, keyPoint.coordinate.second, scale, dx, dy)
                     
@@ -196,7 +205,7 @@ class KeyPointView(context: Context, attrs: AttributeSet? = null) : View(context
                         android.util.Log.d("KeyPointView", "KP ${keyPoint.bodyPart}: 原始=(${keyPoint.coordinate.first.toInt()}, ${keyPoint.coordinate.second.toInt()}), 映射后=(${x.toInt()}, ${y.toInt()}), score=${keyPoint.score}")
                     }
                     
-                    val radius = 8f + (keyPoint.score * 10f)
+                    val radius = 30f + (keyPoint.score * 36f)
                     val alpha = (keyPoint.score * 255).toInt().coerceIn(120, 255)
                     
                     if (keyPoint.bodyPart == BodyPart.LEFT_WRIST || keyPoint.bodyPart == BodyPart.RIGHT_WRIST ||

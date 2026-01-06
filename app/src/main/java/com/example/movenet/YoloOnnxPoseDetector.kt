@@ -67,6 +67,7 @@ class YoloOnnxPoseDetector(private val context: Context) {
         isFrontCamera: Boolean
     ): PoseResult {
         return try {
+            val t0 = System.nanoTime()
             if (ortSession == null) {
                 android.util.Log.e("YoloOnnx", "❌ Session为null")
                 return PoseResult(emptyList(), imageProxy.width, imageProxy.height)
@@ -77,19 +78,28 @@ class YoloOnnxPoseDetector(private val context: Context) {
                 android.util.Log.e("YoloOnnx", "❌ Bitmap转换失败")
                 return PoseResult(emptyList(), imageProxy.width, imageProxy.height)
             }
+            val t1 = System.nanoTime()
             
             // 预处理图像
             val inputTensor = preprocessImage(bitmap)
+            val t2 = System.nanoTime()
             
             // 运行推理
             val inputName = ortSession!!.inputNames.iterator().next()
             val results = ortSession!!.run(mapOf(inputName to inputTensor))
+            val t3 = System.nanoTime()
             
             // 获取输出
             val outputTensor = results[0].value as Array<*>
             
             // 解析输出
             val persons = parseYoloOutput(outputTensor, bitmap.width, bitmap.height, isFrontCamera)
+            val t4 = System.nanoTime()
+
+            android.util.Log.d(
+                "Perf",
+                "onnx toBitmap=${"%.2f".format((t1 - t0) / 1_000_000.0)}ms preprocess=${"%.2f".format((t2 - t1) / 1_000_000.0)}ms infer=${"%.2f".format((t3 - t2) / 1_000_000.0)}ms parse=${"%.2f".format((t4 - t3) / 1_000_000.0)}ms"
+            )
             
             // 清理
             inputTensor.close()

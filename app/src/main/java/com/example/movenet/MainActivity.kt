@@ -62,7 +62,7 @@ class MainActivity : AppCompatActivity() {
     private var lastNonEmptyActionResults: List<ActionResult> = emptyList()
 
     private val poseSmoother = PoseSmoother(
-        alpha = 0.50f,  // 提高alpha让关键点响应更快
+        alpha = 0.70f,  // 提高平滑强度让骨骼点更稳定，0.70f提供更强的稳定性
         minScore = 0.2f
     )
     
@@ -175,6 +175,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun processImage(imageProxy: ImageProxy) {
+        val frameStartNs = System.nanoTime()
         try {
             // 检测姿态
             val poseResult = poseDetector.estimatePoses(
@@ -182,6 +183,7 @@ class MainActivity : AppCompatActivity() {
                 imageProxy.imageInfo.rotationDegrees,
                 /*isFrontCamera=*/true
             )
+            val detectEndNs = System.nanoTime()
             
             // 检测每个人的动作
             val rawActionResults = poseResult.persons.map { person ->
@@ -203,6 +205,7 @@ class MainActivity : AppCompatActivity() {
             
             // 更新可视化
             runOnUiThread {
+                val uiStartNs = System.nanoTime()
                 val nowMs = SystemClock.uptimeMillis()                
                 // 计算FPS
                 frameCount++
@@ -280,6 +283,15 @@ class MainActivity : AppCompatActivity() {
                     )
                     postInvalidateOnAnimation()
                 }
+
+                val uiEndNs = System.nanoTime()
+                val totalMs = (uiEndNs - frameStartNs) / 1_000_000.0
+                val detectMs = (detectEndNs - frameStartNs) / 1_000_000.0
+                val renderMs = (uiEndNs - uiStartNs) / 1_000_000.0
+                Log.d(
+                    "Perf",
+                    "frame total=${"%.2f".format(totalMs)}ms detect=${"%.2f".format(detectMs)}ms render=${"%.2f".format(renderMs)}ms fps=${"%.1f".format(currentFps)}"
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "处理图像失败", e)

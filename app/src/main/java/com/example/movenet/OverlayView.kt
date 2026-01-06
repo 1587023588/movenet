@@ -20,31 +20,33 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
     private var rotation: Int = 0
     private var isMirrored: Boolean = false
     
+    private val neonGreen = Color.parseColor("#7739FF14") // translucent neon green
+
     private val paintCircle = Paint().apply {
-        color = Color.GREEN
+        color = neonGreen
         style = Paint.Style.FILL
-        strokeWidth = 10f
+        strokeWidth = 60f
         isAntiAlias = true
     }
 
     private val paintHandCircle = Paint().apply {
-        color = Color.RED
+        color = neonGreen
         style = Paint.Style.FILL
-        strokeWidth = 10f
+        strokeWidth = 60f
         isAntiAlias = true
     }
     
     private val paintLine = Paint().apply {
-        color = Color.BLUE
+        color = neonGreen
         style = Paint.Style.STROKE
-        strokeWidth = 9f
+        strokeWidth = 48f
         isAntiAlias = true
     }
 
     private val paintArmLine = Paint().apply {
-        color = Color.RED
+        color = neonGreen
         style = Paint.Style.STROKE
-        strokeWidth = 9f
+        strokeWidth = 48f
         isAntiAlias = true
     }
     
@@ -70,6 +72,20 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
         style = Paint.Style.FILL
         isAntiAlias = true
     }
+
+    private val paintCountText = Paint().apply {
+        color = Color.WHITE
+        textSize = 40f
+        style = Paint.Style.FILL
+        isAntiAlias = true
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+
+    private val paintCountBg = Paint().apply {
+        color = Color.parseColor("#66000000")
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
     
     private val paintSmallText = Paint().apply {
         color = Color.WHITE
@@ -85,14 +101,19 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
         isAntiAlias = true
     }
     
-    // 身体骨架连接定义
+    // 身体骨架连接定义（头部只保留鼻梁点）
+    private val ignoredHeadParts = setOf(
+        BodyPart.LEFT_EYE,
+        BodyPart.RIGHT_EYE,
+        BodyPart.LEFT_EAR,
+        BodyPart.RIGHT_EAR
+    )
+
     private val bodyJoints = listOf(
-        // 头部
-        Pair(BodyPart.NOSE, BodyPart.LEFT_EYE),
-        Pair(BodyPart.NOSE, BodyPart.RIGHT_EYE),
-        Pair(BodyPart.LEFT_EYE, BodyPart.LEFT_EAR),
-        Pair(BodyPart.RIGHT_EYE, BodyPart.RIGHT_EAR),
-        
+        // 头部与躯干连接
+        Pair(BodyPart.NOSE, BodyPart.LEFT_SHOULDER),
+        Pair(BodyPart.NOSE, BodyPart.RIGHT_SHOULDER),
+
         // 躯干
         Pair(BodyPart.LEFT_SHOULDER, BodyPart.RIGHT_SHOULDER),
         Pair(BodyPart.LEFT_SHOULDER, BodyPart.LEFT_HIP),
@@ -149,9 +170,22 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
         val fpsY = 60f
         canvas.drawText(fpsText, fpsX, fpsY, paintText)
 
-        // 绘制计数（左上角，不与动作文字重叠）
-        canvas.drawText("深蹲: $squatCount", 30f, 50f, paintText)
-        canvas.drawText("开合跳: $jumpingJackCount", 30f, 90f, paintText)
+        // 绘制计数（左上角），只显示深蹲
+        val countPaddingH = 24f
+        val countPaddingV = 18f
+        val countText = "深蹲: $squatCount"
+        val maxTextWidth = paintCountText.measureText(countText)
+        val blockWidth = maxTextWidth + countPaddingH * 2
+        val blockHeight = countPaddingV * 2 + 40f
+        val bgLeft = (width - blockWidth) / 2f
+        val bgTop = 20f
+        val bgRight = bgLeft + blockWidth
+        val bgBottom = bgTop + blockHeight
+
+        canvas.drawRoundRect(bgLeft, bgTop, bgRight, bgBottom, 20f, 20f, paintCountBg)
+
+        val textY = bgTop + countPaddingV + 32f
+        canvas.drawText(countText, bgLeft + countPaddingH, textY, paintCountText)
         
         if (persons.isEmpty()) {
             // 显示提示信息
@@ -214,6 +248,8 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
             
             // 绘制检测到的关键点
             person.keyPoints.forEach { keyPoint ->
+                if (ignoredHeadParts.contains(keyPoint.bodyPart)) return@forEach
+
                 if (keyPoint.score > 0.2f) {
                     val (x, y) = mapPoint(keyPoint.coordinate.first, keyPoint.coordinate.second, scale, dx, dy)
                     
@@ -223,10 +259,10 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
                     if (keyPoint.bodyPart == BodyPart.LEFT_WRIST || keyPoint.bodyPart == BodyPart.RIGHT_WRIST ||
                         keyPoint.bodyPart == BodyPart.LEFT_ELBOW || keyPoint.bodyPart == BodyPart.RIGHT_ELBOW) {
                         paintHandCircle.alpha = alpha.coerceAtLeast(120)
-                        canvas.drawCircle(x, y, 10f, paintHandCircle)
+                        canvas.drawCircle(x, y, 20f, paintHandCircle)
                     } else {
                         paintCircle.alpha = alpha.coerceAtLeast(120)
-                        canvas.drawCircle(x, y, 10f, paintCircle)
+                        canvas.drawCircle(x, y, 20f, paintCircle)
                     }
                 }
             }
@@ -246,7 +282,7 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
                 }
                 
                 canvas.drawText(
-                    "动作: $actionName (${String.format("%.0f%%", actionResult.confidence * 100)})",
+                    "$actionName (${String.format("%.0f%%", actionResult.confidence * 100)})",
                     30f,
                     yOffset,
                     paintText
